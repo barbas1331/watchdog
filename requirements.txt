@@ -1,0 +1,8 @@
+flask==3.0.3
+flask-socketio==5.3.6
+psutil==6.0.0
+scapy==2.5.0
+requests==2.32.3
+geoip2==4.8.0
+python-dotenv==1.0.1
+

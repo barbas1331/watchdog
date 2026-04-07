@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>🔍 Watchdog de Red — Privacidad</title>
+<link rel="stylesheet" href="/static/css/style.css"/>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+
+<!-- ── HEADER ──────────────────────────────────────────────── -->
+<header class="topbar">
+  <div class="topbar-left">
+    <span class="logo">🔍 Watchdog</span>
+    <span class="subtitle">Monitor de Privacidad de Red</span>
+  </div>
+  <div class="topbar-center">
+    <div class="stat-pill" id="pill-connections"><span id="cnt-total">0</span> conexiones</div>
+    <div class="stat-pill external"><span id="cnt-external">0</span> externas</div>
+    <div class="stat-pill sent">↑ <span id="stat-sent">0 B</span></div>
+    <div class="stat-pill recv">↓ <span id="stat-recv">0 B</span></div>
+  </div>
+  <div class="topbar-right">
+    <div class="badge" id="badge-admin">{{ 'ADMIN ✅' if admin else 'SIN ADMIN ⚠️' }}</div>
+    <div class="badge" id="badge-scapy">{{ 'Captura ✅' if scapy else 'Sin Npcap ⚠' }}</div>
+    <div class="conn-dot" id="ws-dot" title="WebSocket"></div>
+  </div>
+</header>
+
+<!-- ── MAIN LAYOUT ─────────────────────────────────────────── -->
+<div class="layout">
+
+  <!-- ── SIDEBAR IZQUIERDO: Navegación ── -->
+  <nav class="sidebar">
+    <button class="nav-btn active" data-tab="tab-live" onclick="switchTab('tab-live', this)">
+      <span class="icon">📡</span> En Vivo
+    </button>
+    <button class="nav-btn" data-tab="tab-history" onclick="switchTab('tab-history', this)">
+      <span class="icon">📜</span> Historial
+    </button>
+    <button class="nav-btn" data-tab="tab-blocked" onclick="switchTab('tab-blocked', this)">
+      <span class="icon">🚫</span> Bloqueados
+    </button>
+    <button class="nav-btn" data-tab="tab-capture" onclick="switchTab('tab-capture', this)">
+      <span class="icon">📦</span> Captura
+    </button>
+    <button class="nav-btn" data-tab="tab-top" onclick="switchTab('tab-top', this)">
+      <span class="icon">🌍</span> Top Destinos
+    </button>
+    <button class="nav-btn" data-tab="tab-events" onclick="switchTab('tab-events', this)">
+      <span class="icon">⚡</span> Eventos
+    </button>
+    <hr class="nav-sep"/>
+    <div class="my-ip-box">
+      <div class="label">Mi IP</div>
+      <div id="my-ip" class="value">...</div>
+    </div>
+  </nav>
+
+  <!-- ── CONTENIDO PRINCIPAL ── -->
+  <main class="main-content">
+
+    <!-- ══ TAB: EN VIVO ══════════════════════════════════════ -->
+    <section id="tab-live" class="tab active">
+      <div class="section-header">
+        <h2>Conexiones Activas</h2>
+        <div class="tools">
+          <input type="text" id="filter-input" class="search-input"
+                 placeholder="Filtrar: proceso, IP, dominio..." oninput="filterConnections()"/>
+          <label class="toggle-label">
+            <input type="checkbox" id="chk-external" onchange="filterConnections()"/> Solo externas
+          </label>
+          <button class="btn-refresh" onclick="manualRefresh()">↻ Actualizar</button>
+        </div>
+      </div>
+
+      <!-- Tabla de conexiones -->
+      <div class="table-wrap">
+        <table class="conn-table" id="conn-table">
+          <thead>
+            <tr>
+              <th>Proceso</th>
+              <th>PID</th>
+              <th>Local</th>
+              <th>Remoto</th>
+              <th>Host / Dominio</th>
+              <th>País</th>
+              <th>Org / ISP</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="conn-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ══ TAB: HISTORIAL ══════════════════════════════════════ -->
+    <section id="tab-history" class="tab">
+      <div class="section-header">
+        <h2>Historial de Conexiones</h2>
+        <button class="btn-secondary" onclick="loadHistory()">↻ Cargar</button>
+      </div>
+      <div class="table-wrap">
+        <table class="conn-table">
+          <thead>
+            <tr>
+              <th>Fecha/Hora</th><th>Proceso</th><th>IP Remota</th>
+              <th>Host</th><th>País</th><th>Org</th><th>Puerto</th>
+            </tr>
+          </thead>
+          <tbody id="hist-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ══ TAB: BLOQUEADOS ══════════════════════════════════════ -->
+    <section id="tab-blocked" class="tab">
+      <div class="section-header">
+        <h2>IPs y Procesos Bloqueados</h2>
+        <div class="tools">
+          <input type="text" id="manual-block-ip" class="search-input" placeholder="IP a bloquear manualmente..."/>
+          <select id="block-dir" class="search-input" style="width:110px">
+            <option value="both">Entrada+Salida</option>
+            <option value="out">Solo Salida</option>
+            <option value="in">Solo Entrada</option>
+          </select>
+          <button class="btn-danger" onclick="manualBlockIP()">🚫 Bloquear</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="conn-table">
+          <thead>
+            <tr><th>Fecha</th><th>IP</th><th>Proceso</th><th>Dirección</th><th>Acciones</th></tr>
+          </thead>
+          <tbody id="blocked-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ══ TAB: CAPTURA DE PAQUETES ══════════════════════════════ -->
+    <section id="tab-capture" class="tab">
+      <div class="section-header">
+        <h2>Captura de Paquetes</h2>
+        <span class="hint">Requiere Npcap — <a href="https://npcap.com" target="_blank" class="link">descargar</a></span>
+      </div>
+      <div id="capture-status-bar" class="status-bar"></div>
+      <div id="capture-sessions-list" class="sessions-list"></div>
+      <div class="table-wrap">
+        <table class="conn-table pkt-table">
+          <thead>
+            <tr>
+              <th>Hora</th><th>Dir</th><th>Proto</th>
+              <th>Origen</th><th>Destino</th><th>Bytes</th>
+              <th>Resumen</th><th>Payload</th>
+            </tr>
+          </thead>
+          <tbody id="pkt-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ══ TAB: TOP DESTINOS ══════════════════════════════════════ -->
+    <section id="tab-top" class="tab">
+      <div class="section-header">
+        <h2>Top Destinos (Historial)</h2>
+        <button class="btn-secondary" onclick="loadTop()">↻ Cargar</button>
+      </div>
+      <div class="table-wrap">
+        <table class="conn-table">
+          <thead>
+            <tr><th>IP</th><th>Host</th><th>País</th><th>Org</th><th>Conexiones</th><th>Procesos</th><th>Acciones</th></tr>
+          </thead>
+          <tbody id="top-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ══ TAB: EVENTOS ══════════════════════════════════════════ -->
+    <section id="tab-events" class="tab">
+      <div class="section-header">
+        <h2>Registro de Eventos</h2>
+        <button class="btn-secondary" onclick="loadEvents()">↻ Cargar</button>
+      </div>
+      <div class="table-wrap">
+        <table class="conn-table">
+          <thead>
+            <tr><th>Fecha/Hora</th><th>Tipo</th><th>Objetivo</th><th>Detalle</th><th>OK</th></tr>
+          </thead>
+          <tbody id="events-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── PANEL DERECHO: Detalle de conexión ── -->
+  <aside class="detail-panel" id="detail-panel">
+    <div class="detail-header">
+      <span>Detalle</span>
+      <button class="btn-close" onclick="closeDetail()">✕</button>
+    </div>
+    <div id="detail-content" class="detail-body">
+      <p class="hint-center">Haz clic en una conexión para ver detalles</p>
+    </div>
+  </aside>
+
+</div><!-- /.layout -->
+
+<!-- ── TOAST NOTIFICATIONS ─────── -->
+<div id="toast-container"></div>
+
+<!-- ── MODAL CONFIRMACIÓN ──────── -->
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div id="modal-title" class="modal-title"></div>
+    <div id="modal-body" class="modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn-danger" id="modal-confirm">Confirmar</button>
+      <button class="btn-secondary" onclick="closeModal()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
